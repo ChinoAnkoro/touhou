@@ -108,7 +108,7 @@ class Bullet:
         self.y = y
         self.w = size
         self.h = size * 2
-        self.speed = scale_val(8)
+        self.speed = scale_val(80) # 弾の速度を10倍にする
         self.power = power
         self.color = color
         self.dx = dx
@@ -415,7 +415,7 @@ class App:
             h = scale_val(60)
             x = random.random() * (SCREEN_WIDTH - w)
             y = -h # Start from top
-            speed = random.uniform(scale_val(0.5), scale_val(1.5))
+            speed = random.uniform(scale_val(2), scale_val(5)) # 落下速度を速くする
             self.clouds.append(Cloud(x, y, w, h, speed))
 
     def update(self):
@@ -708,13 +708,13 @@ class App:
         h = random.randint(scale_val(20), scale_val(70))
         x = random.random() * (SCREEN_WIDTH - w)
         y = -h # Start from top
-        speed = random.uniform(scale_val(0.5), scale_val(1.5))
+        speed = random.uniform(scale_val(2), scale_val(5)) # 落下速度を速くする
         self.clouds.append(Cloud(x, y, w, h, speed))
 
     def create_item(self, cloud):
         item_w = scale_val(20)
         item_h = scale_val(20)
-        item_speed = scale_val(1.5)
+        item_speed = scale_val(5) # アイテムの落下速度を速くする
         self.items.append(Item(cloud.x + cloud.w / 2 - item_w / 2, cloud.y + cloud.h, item_w, item_h, item_speed, 0)) # Start with score item
 
     def create_heal_item(self, enemy):
