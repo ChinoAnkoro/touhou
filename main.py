@@ -414,7 +414,7 @@ class App:
             w = scale_val(120)
             h = scale_val(60)
             x = random.random() * (SCREEN_WIDTH - w)
-            y = -h # Start from top
+            y = random.uniform(-h * 2, -h) # 画面上部の異なる高さから出現
             speed = scale_val(7) # 落下速度を速くする
             self.clouds.append(Cloud(x, y, w, h, speed))
 
@@ -507,11 +507,11 @@ class App:
                 if self.current_wave_index < len(self.waves):
                     self.enemies_to_spawn_in_current_wave = list(self.waves[self.current_wave_index]) # 次のウェーブの敵をコピー
                     self.current_wave_index += 1
+                    self.wave_spawn_timer = 0 # 新しいウェーブ開始時にタイマーをリセット
                 else:
-                    # 全てのウェーブが終了したら、ランダム出現に戻すか、ゲームクリアなど
-                    # ここでは一旦ランダム出現に戻す
+                    # 全てのウェーブが終了したら、ランダム出現に戻す
                     self.enemy_spawn_timer += 1
-                    if self.enemy_spawn_timer >= 4: # 4フレームに1回敵を出現させる
+                    if self.enemy_spawn_timer >= 60: # 1秒に1回敵を出現させる
                         self.spawn_enemy()
                         self.enemy_spawn_timer = 0
 
@@ -703,7 +703,7 @@ class App:
         w = random.randint(scale_val(50), scale_val(150))
         h = random.randint(scale_val(20), scale_val(70))
         x = random.random() * (SCREEN_WIDTH - w)
-        y = -h # Start from top
+        y = random.uniform(-h * 2, -h) # 画面上部の異なる高さから出現
         speed = scale_val(7) # 落下速度を速くする
         self.clouds.append(Cloud(x, y, w, h, speed))
 
