@@ -388,26 +388,11 @@ class App:
 
         self.score = 0
         self.high_score = self.load_high_score() # ハイスコアを読み込む
-        self.game_phase = 'start' # start, stage, boss, gameover, clear
-        self.start_timer = 0
+        self.game_phase = 'playing' # playing, gameover, clear
+        self.boss_intro_timer = 0 # ボス導入タイマーを初期化
 
         self.enemy_spawn_timer = 0
         self.cloud_spawn_timer = 0
-
-        # 敵のウェーブ定義
-        self.waves = [
-            # Wave 1: シューターとスウォーマー
-            ['shooter', 'shooter', 'shooter', 'swarmer', 'swarmer'],
-            # Wave 2: アーマードとシューター
-            ['armored', 'shooter', 'shooter', 'shooter'],
-            # Wave 3: ミックス
-            ['swarmer', 'swarmer', 'armored', 'shooter', 'shooter', 'swarmer'],
-            # 必要に応じてさらにウェーブを追加
-        ]
-        self.current_wave_index = 0
-        self.enemies_to_spawn_in_current_wave = [] # 現在のウェーブで出現させる敵のリスト
-        self.wave_spawn_timer = 0
-        self.wave_spawn_interval = 60 # 敵の出現間隔 (フレーム数)
 
         # 初期雲を10個生成
         for _ in range(10):
@@ -457,8 +442,8 @@ class App:
             self.bomb_effects.append(BombEffect(self.player.x + self.player.w / 2, self.player.y + self.player.h / 2))
 
         # ゲームフェーズの移行
-        if self.game_phase == 'stage' and self.score >= 100000: # スコア閾値を100000に調整
-            self.game_phase = 'boss_intro'
+        if self.score >= 100000 and self.boss is None: # スコア閾値を100000に調整し、ボスがまだ出現していない場合
+            self.game_phase = 'boss_intro' # ボス導入フェーズに移行
             self.enemies.clear() # 残っている敵をクリア
             self.boss_intro_timer = 0
             # ボス登場前の雲を10個生成
@@ -466,21 +451,13 @@ class App:
                 w = scale_val(120)
                 h = scale_val(60)
                 x = random.random() * (SCREEN_WIDTH - w)
-                y = -h # Start from top
-                speed = random.uniform(scale_val(0.5), scale_val(1.5))
+                y = random.uniform(-h * 2, -h) # 画面上部の異なる高さから出現
+                speed = random.uniform(scale_val(2), scale_val(5))
                 self.clouds.append(Cloud(x, y, w, h, speed))
             pyxel.playm(-1) # 現在のBGMを停止
 
-        if self.game_phase == 'boss_intro':
+        if self.game_phase == 'boss_intro': # ボス導入フェーズ中
             self.boss_intro_timer += 1
-            # 雲の更新
-            for cloud in self.clouds:
-                cloud.update()
-                if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
-                    cloud.dropped_item = True
-                    self.create_item(cloud)
-            self.clouds = [c for c in self.clouds if c.y < SCREEN_HEIGHT]
-
             if self.boss_intro_timer >= 420: # 7秒経過 (60フレーム/秒 * 7秒)
                 self.game_phase = 'boss'
                 self.boss = Boss()
@@ -501,26 +478,12 @@ class App:
             item.update()
         self.heal_items = [i for i in self.heal_items if i.y < SCREEN_HEIGHT]
 
-        if self.game_phase == 'stage':
-            # 敵の出現 (ウェーブベース)
-            if not self.enemies_to_spawn_in_current_wave and not self.enemies: # 現在のウェーブの敵が全て出現し、かつ画面上の敵がいない場合
-                if self.current_wave_index < len(self.waves):
-                    self.enemies_to_spawn_in_current_wave = list(self.waves[self.current_wave_index]) # 次のウェーブの敵をコピー
-                    self.current_wave_index += 1
-                    self.wave_spawn_timer = 0 # 新しいウェーブ開始時にタイマーをリセット
-                else:
-                    # 全てのウェーブが終了したら、ランダム出現に戻す
-                    self.enemy_spawn_timer += 1
-                    if self.enemy_spawn_timer >= 60: # 1秒に1回敵を出現させる
-                        self.spawn_enemy()
-                        self.enemy_spawn_timer = 0
-
-            if self.enemies_to_spawn_in_current_wave: # 出現させる敵がいる場合
-                self.wave_spawn_timer += 1
-                if self.wave_spawn_timer >= self.wave_spawn_interval:
-                    enemy_type = self.enemies_to_spawn_in_current_wave.pop(0)
-                    self.spawn_enemy(fixed_type=enemy_type)
-                    self.wave_spawn_timer = 0
+        # 敵の出現 (ランダム)
+        if self.boss is None and self.game_phase != 'boss_intro': # ボスが出現していない、かつボス導入フェーズ中でない場合のみ敵を出現させる
+            self.enemy_spawn_timer += 1
+            if self.enemy_spawn_timer >= 60: # 1秒に1回敵を出現させる
+                self.spawn_enemy()
+                self.enemy_spawn_timer = 0
 
             # 雲の出現
             self.cloud_spawn_timer += 1
@@ -620,11 +583,6 @@ class App:
         if self.boss:
             self.boss.draw()
 
-        # ボス登場演出中は雲を描画
-        if self.game_phase == 'boss_intro':
-            for cloud in self.clouds:
-                cloud.draw()
-
         # 爆発エフェクトの描画
         for explosion in self.explosions:
             explosion.draw()
@@ -661,17 +619,14 @@ class App:
         else:
             self.bullets.append(Bullet(self.player.x + self.player.w / 2 - bullet_props['w'] / 2, bullet_props['y'], 0, bullet_props['power'], bullet_props['w'], bullet_props['color']))
 
-    def spawn_enemy(self, fixed_type=None):
-        if fixed_type:
-            enemy_type = fixed_type
+    def spawn_enemy(self):
+        type_roll = random.random()
+        if type_roll < 0.6:
+            enemy_type = 'shooter'
+        elif type_roll < 0.85:
+            enemy_type = 'swarmer'
         else:
-            type_roll = random.random()
-            if type_roll < 0.6:
-                enemy_type = 'shooter'
-            elif type_roll < 0.85:
-                enemy_type = 'swarmer'
-            else:
-                enemy_type = 'armored'
+            enemy_type = 'armored'
         
         size = scale_val(40)
         if enemy_type == 'shooter':
