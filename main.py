@@ -48,6 +48,9 @@ class Player:
 
         self.invincible_timer = 0 # 無敵時間
 
+        self.shot_cooldown = 5 # ショットのクールダウン (フレーム数)
+        self.shot_timer = 0 # ショットタイマー
+
     def update(self):
         if pyxel.btn(pyxel.KEY_UP):
             self.y -= self.speed
@@ -108,7 +111,7 @@ class Bullet:
         self.y = y
         self.w = size
         self.h = size * 2
-        self.speed = scale_val(80) # 弾の速度を10倍にする
+        self.speed = scale_val(40) # 弾の速度を半分にする
         self.power = power
         self.color = color
         self.dx = dx
@@ -420,9 +423,13 @@ class App:
         self.clouds = [c for c in self.clouds if c.y < SCREEN_HEIGHT]
 
         # Player input handling (shooting, hammer, special attack)
-        if pyxel.btnp(pyxel.KEY_SPACE):
+        if self.player.shot_timer > 0:
+            self.player.shot_timer -= 1
+
+        if pyxel.btn(pyxel.KEY_SPACE) and self.player.shot_timer <= 0:
             self.create_bullet()
             pyxel.play(0, 0) # ショット音
+            self.player.shot_timer = self.player.shot_cooldown
 
         # ハンマー攻撃 (Zキー)
         if pyxel.btnp(pyxel.KEY_Z):
@@ -481,7 +488,7 @@ class App:
         # 敵の出現 (ランダム)
         if self.boss is None and self.game_phase != 'boss_intro': # ボスが出現していない、かつボス導入フェーズ中でない場合のみ敵を出現させる
             self.enemy_spawn_timer += 1
-            if self.enemy_spawn_timer >= 60: # 1秒に1回敵を出現させる
+            if self.enemy_spawn_timer >= 30: # 0.5秒に1回敵を出現させる
                 self.spawn_enemy()
                 self.enemy_spawn_timer = 0
 
