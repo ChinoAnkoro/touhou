@@ -488,7 +488,7 @@ class App:
         # 敵の出現 (ランダム)
         if self.boss is None and self.game_phase != 'boss_intro': # ボスが出現していない、かつボス導入フェーズ中でない場合のみ敵を出現させる
             self.enemy_spawn_timer += 1
-            if self.enemy_spawn_timer >= 30: # 0.5秒に1回敵を出現させる
+            if self.enemy_spawn_timer >= 3: # 0.05秒に1回敵を出現させる (10倍)
                 self.spawn_enemy()
                 self.enemy_spawn_timer = 0
 
