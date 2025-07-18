@@ -1,6 +1,8 @@
 import pyxel
 import math
 import random
+import os
+from pathlib import Path
 
 # Pyxelの画面サイズ
 SCREEN_WIDTH = 256
@@ -13,6 +15,8 @@ ORIGINAL_CANVAS_HEIGHT = 600
 # スケールファクター (元のサイズをPyxelの画面サイズに合わせるため)
 # 幅と高さで異なるスケールになるが、ここでは統一して0.35を使用
 SCALE_FACTOR = 0.35
+
+
 
 def scale_x(val):
     return int(val * (SCREEN_WIDTH / ORIGINAL_CANVAS_WIDTH))
@@ -41,6 +45,8 @@ class Player:
         self.hammer_cooldown = 10
         self.hammer_timer = 0
 
+        self.invincible_timer = 0 # 無敵時間
+
     def update(self):
         if pyxel.btn(pyxel.KEY_UP):
             self.y -= self.speed
@@ -61,7 +67,15 @@ class Player:
         else:
             self.is_hammering = False
 
+        # 無敵時間の更新
+        if self.invincible_timer > 0:
+            self.invincible_timer -= 1
+
     def draw(self):
+        # 無敵時間中は点滅
+        if self.invincible_timer > 0 and pyxel.frame_count % 4 < 2:
+            return
+
         # バリアの描画
         if self.has_barrier:
             pyxel.circ(self.x + self.w / 2, self.y + self.h / 2, self.w / 2, 8) # Pyxel color 8 (light blue)
@@ -126,7 +140,16 @@ class Enemy:
             self.dx *= -1
 
     def draw(self):
-        pyxel.rect(self.x, self.y, self.w, self.h, self.color)
+        # 胴体
+        pyxel.rect(self.x, self.y + self.h / 4, self.w, self.h / 2, self.color)
+        # 頭
+        pyxel.tri(self.x + self.w / 4, self.y, self.x + self.w * 3 / 4, self.y, self.x + self.w / 2, self.y + self.h / 4, self.color)
+        # 左翼
+        pyxel.tri(self.x - self.w / 4, self.y + self.h / 4, self.x, self.y + self.h / 2, self.x, self.y + self.h / 4, 10)
+        # 右翼
+        pyxel.tri(self.x + self.w, self.y + self.h / 4, self.x + self.w * 5 / 4, self.y + self.h / 2, self.x + self.w, self.y + self.h / 4, 10)
+        # 尻尾
+        pyxel.tri(self.x + self.w / 2, self.y + self.h / 2, self.x + self.w * 3 / 4, self.y + self.h, self.x + self.w / 4, self.y + self.h, self.color)
 
 class EnemyBullet:
     def __init__(self, x, y, dx, dy, w, h, speed, color):
@@ -178,6 +201,22 @@ class Item:
         else:
             pyxel.rect(self.x, self.y, self.w, self.h, self.type['color'])
 
+class Explosion:
+    def __init__(self, x, y, size, color, duration):
+        self.x = x
+        self.y = y
+        self.size = size
+        self.color = color
+        self.duration = duration
+        self.timer = duration
+
+    def update(self):
+        self.timer -= 1
+
+    def draw(self):
+        if self.timer > 0:
+            pyxel.rect(self.x - self.size / 2, self.y - self.size / 2, self.size, self.size, self.color)
+
 class HealItem:
     def __init__(self, x, y, w, h, speed, color):
         self.x = x
@@ -194,16 +233,20 @@ class HealItem:
         pyxel.rect(self.x, self.y, self.w, self.h, self.color)
 
 class Cloud:
-    def __init__(self, x, y, w, h, speed):
+    def __init__(self, x, y, w, h, speed, is_background_cloud=False):
         self.x = x
         self.y = y
         self.w = w
         self.h = h
         self.speed = speed
         self.dropped_item = False
+        self.is_background_cloud = is_background_cloud
 
     def update(self):
-        self.x += self.speed
+        if self.is_background_cloud:
+            self.y += self.speed # Move downwards for background
+        else:
+            self.x += self.speed # Original horizontal movement for item clouds
 
     def draw(self):
         # Pyxelには楕円描画がないので、rectで代用するか、後で画像を使う
@@ -245,6 +288,29 @@ class App:
     def __init__(self):
         pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT)
         pyxel.title("Pyxel Danmaku Game")
+
+        # ハイスコアファイルのパス
+        self.SAVE_DIR = Path(pyxel.user_data_dir("PyxelDanmakuGame", "HighScores"))
+        self.HIGH_SCORE_FILE = self.SAVE_DIR / "highscore.txt"
+
+        self.reset_game()
+        pyxel.run(self.update, self.draw)
+
+    def load_high_score(self):
+        if not self.HIGH_SCORE_FILE.exists():
+            return 0
+        try:
+            with open(self.HIGH_SCORE_FILE, "r") as f:
+                return int(f.read())
+        except (ValueError, IOError):
+            return 0
+
+    def save_high_score(self, score):
+        self.SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(self.HIGH_SCORE_FILE, "w") as f:
+            f.write(str(score))
+
+    def reset_game(self):
         self.player = Player()
         self.bullets = []
         self.enemies = []
@@ -253,19 +319,24 @@ class App:
         self.items = []
         self.heal_items = []
         self.boss = None
+        self.explosions = [] # 爆発エフェクトのリスト
+
+        # サウンド定義
+        pyxel.sound(0).set(notes="c1", tones="n", volumes="2", effects="q", speed=5) # Shot
+        pyxel.sound(1).set(notes="c1", tones="n", volumes="7", effects="f", speed=15) # Hit/Explosion
+        pyxel.sound(2).set(notes="c1", tones="n", volumes="7", effects="f", speed=30) # Player Hit
 
         self.score = 0
+        self.high_score = self.load_high_score() # ハイスコアを読み込む
         self.game_phase = 'stage' # stage, boss, gameover, clear
 
         self.enemy_spawn_timer = 0
         self.cloud_spawn_timer = 0
 
-        pyxel.run(self.update, self.draw)
-
     def update(self):
         if self.game_phase == 'gameover' or self.game_phase == 'clear':
             if pyxel.btnp(pyxel.KEY_R): # Rキーでリスタート
-                self.__init__() # ゲームをリセット
+                self.reset_game() # ゲームをリセット
             return
 
         # ゲームフェーズの移行
@@ -279,6 +350,7 @@ class App:
         # プレイヤーの弾生成
         if pyxel.btnp(pyxel.KEY_SPACE):
             self.create_bullet()
+            pyxel.play(0, 0) # ショット音
 
         
 
@@ -316,8 +388,13 @@ class App:
             # 雲の出現
             self.cloud_spawn_timer += 1
             if self.cloud_spawn_timer >= 240: # 4秒に1回 (240フレーム)
-                self.spawn_cloud()
+                self.spawn_cloud() # アイテムドロップ用の雲
                 self.cloud_spawn_timer = 0
+
+            # 背景用の雲の出現 (スコア1000以上2000未満)
+            if self.score >= 1000 and self.score < 2000:
+                if random.random() < 0.005: # 確率で背景用の雲を生成
+                    self.spawn_cloud(is_background_cloud=True)
 
             # 敵の更新
             for enemy in self.enemies:
@@ -330,11 +407,16 @@ class App:
             # 雲の更新
             for cloud in self.clouds:
                 cloud.update()
-                # アイテムドロップ判定
-                if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
-                    cloud.dropped_item = True
-                    self.create_item(cloud)
-            self.clouds = [c for c in self.clouds if c.x > -c.w and c.x < SCREEN_WIDTH + c.w]
+                if cloud.is_background_cloud:
+                    # 背景用の雲は画面外に出たら削除
+                    if cloud.y > SCREEN_HEIGHT:
+                        self.clouds.remove(cloud)
+                else:
+                    # アイテムドロップ判定
+                    if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
+                        cloud.dropped_item = True
+                        self.create_item(cloud)
+            self.clouds = [c for c in self.clouds if c.x > -c.w and c.x < SCREEN_WIDTH + c.w or c.is_background_cloud and c.y < SCREEN_HEIGHT]
 
         elif self.game_phase == 'boss':
             if self.boss:
@@ -352,10 +434,46 @@ class App:
             bullet.update()
         self.enemy_bullets = [b for b in self.enemy_bullets if b.y > -b.h and b.y < SCREEN_HEIGHT + b.h and b.x > -b.w and b.x < SCREEN_WIDTH + b.w]
 
+        # 爆発エフェクトの更新
+        for explosion in self.explosions:
+            explosion.update()
+        self.explosions = [e for e in self.explosions if e.timer > 0]
+
         self.check_collisions()
 
     def draw(self):
-        pyxel.cls(0) # 画面を黒でクリア
+        # Background drawing based on score
+        if self.score < 1000:
+            # Sea background
+            for y in range(SCREEN_HEIGHT):
+                if y < SCREEN_HEIGHT * 0.2: # Top 20% (lighter blue)
+                    pyxel.rect(0, y, SCREEN_WIDTH, 1, 12) # Light blue
+                elif y < SCREEN_HEIGHT * 0.5: # Middle 30% (medium blue)
+                    pyxel.rect(0, y, SCREEN_WIDTH, 1, 1) # Dark blue
+                else: # Bottom 50% (darker blue) 
+                    pyxel.rect(0, y, SCREEN_WIDTH, 1, 1) # Dark blue
+        elif self.score < 2000:
+            # Sky background with clouds
+            pyxel.cls(12) # Light blue for sky
+            for cloud in self.clouds:
+                if cloud.is_background_cloud:
+                    cloud.draw()
+        else:
+            # Space background with Earth
+            pyxel.cls(0) # Black for space
+            # Draw stars (simple random pixels)
+            for _ in range(100):
+                star_x = random.randint(0, SCREEN_WIDTH - 1)
+                star_y = random.randint(0, SCREEN_HEIGHT - 1)
+                pyxel.pset(star_x, star_y, 7) # White stars
+            
+            # Draw Earth (simple circle with blue and green)
+            earth_radius = scale_val(50)
+            earth_x = SCREEN_WIDTH / 2
+            earth_y = SCREEN_HEIGHT / 4 * 3 # Near bottom
+            pyxel.circ(earth_x, earth_y, earth_radius, 1) # Blue ocean
+            pyxel.circ(earth_x + earth_radius / 3, earth_y - earth_radius / 3, earth_radius / 2, 3) # Green land
+            pyxel.circ(earth_x - earth_radius / 2, earth_y + earth_radius / 4, earth_radius / 4, 3) # Green land
 
         self.player.draw()
 
@@ -380,12 +498,16 @@ class App:
         if self.boss:
             self.boss.draw()
 
+        # 爆発エフェクトの描画
+        for explosion in self.explosions:
+            explosion.draw()
+
         self.draw_ui()
 
         if self.game_phase == 'gameover':
             pyxel.rect(0, SCREEN_HEIGHT / 2 - 20, SCREEN_WIDTH, 40, 0) # 黒い帯
-            pyxel.text(SCREEN_WIDTH / 2 - pyxel.width("GAME OVER") / 2, SCREEN_HEIGHT / 2 - 10, "GAME OVER", 7)
-            pyxel.text(SCREEN_WIDTH / 2 - pyxel.width("PRESS R TO RESTART") / 2, SCREEN_HEIGHT / 2 + 5, "PRESS R TO RESTART", 7)
+            pyxel.text(SCREEN_WIDTH / 2 - len("GAME OVER") * 4 / 2, SCREEN_HEIGHT / 2 - 10, "GAME OVER", 7)
+            pyxel.text(SCREEN_WIDTH / 2 - len("PRESS R TO RESTART") * 4 / 2, SCREEN_HEIGHT / 2 + 5, "PRESS R TO RESTART", 7)
         elif self.game_phase == 'clear':
             pyxel.rect(0, SCREEN_HEIGHT / 2 - 20, SCREEN_WIDTH, 40, 0) # 黒い帯
             pyxel.text(SCREEN_WIDTH / 2 - pyxel.width("GAME CLEAR") / 2, SCREEN_HEIGHT / 2 - 10, "GAME CLEAR", 10)
@@ -439,14 +561,22 @@ class App:
         dy = math.sin(angle) * bullet_speed
         self.enemy_bullets.append(EnemyBullet(source.x + source.w / 2 - bullet_w / 2, source.y + source.h / 2, dx, dy, bullet_w, bullet_h, bullet_speed, 6)) # Pink
 
-    def spawn_cloud(self):
-        side = random.choice(['left', 'right'])
-        w = scale_val(120)
-        h = scale_val(60)
-        x = -w if side == 'left' else SCREEN_WIDTH
-        y = random.random() * (SCREEN_HEIGHT / 4)
-        speed = scale_val(1) if side == 'left' else -scale_val(1)
-        self.clouds.append(Cloud(x, y, w, h, speed))
+    def spawn_cloud(self, is_background_cloud=False):
+        if is_background_cloud:
+            w = random.randint(scale_val(50), scale_val(150))
+            h = random.randint(scale_val(20), scale_val(70))
+            x = random.random() * (SCREEN_WIDTH - w)
+            y = -h # Start from top
+            speed = random.uniform(scale_val(0.5), scale_val(1.5))
+            self.clouds.append(Cloud(x, y, w, h, speed, is_background_cloud=True))
+        else:
+            side = random.choice(['left', 'right'])
+            w = scale_val(120)
+            h = scale_val(60)
+            x = -w if side == 'left' else SCREEN_WIDTH
+            y = random.random() * (SCREEN_HEIGHT / 4)
+            speed = scale_val(1) if side == 'left' else -scale_val(1)
+            self.clouds.append(Cloud(x, y, w, h, speed))
 
     def create_item(self, cloud):
         item_w = scale_val(20)
@@ -475,6 +605,8 @@ class App:
                     if enemy.health <= 0:
                         self.enemies.pop(j)
                         self.score += 100
+                        self.explosions.append(Explosion(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, scale_val(30), 7, 10)) # 白い爆発
+                        pyxel.play(1, 1) # 爆発音
                         if random.random() < 0.1:
                             self.create_heal_item(enemy)
                     break # 弾が当たったら次の弾へ
@@ -503,6 +635,8 @@ class App:
                     if enemy.health <= 0:
                         self.enemies.pop(j)
                         self.score += 150
+                        self.explosions.append(Explosion(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, scale_val(40), 7, 15)) # 白い爆発
+                        pyxel.play(1, 1) # 爆発音
                         if random.random() < 0.1:
                             self.create_heal_item(enemy)
 
@@ -534,27 +668,33 @@ class App:
         for i in range(len(self.enemies) - 1, -1, -1):
             enemy = self.enemies[i]
             if self.is_colliding(self.player, enemy):
-                self.enemies.pop(i)
-                if self.player.has_barrier:
-                    self.player.has_barrier = False
-                else:
-                    self.player.life -= 1
-                    if self.player.life <= 0:
-                        self.game_over()
-                return # プレイヤーがダメージを受けたら、他の敵との衝突はチェックしない
+                if self.player.invincible_timer == 0: # 無敵時間中でない場合のみダメージ
+                    self.enemies.pop(i)
+                    if self.player.has_barrier:
+                        self.player.has_barrier = False
+                    else:
+                        self.player.life -= 1
+                        pyxel.play(0, 2) # プレイヤー被弾音
+                        self.player.invincible_timer = 60 # 1秒間の無敵時間 (60フレーム)
+                        if self.player.life <= 0:
+                            self.game_over()
+                    return # プレイヤーがダメージを受けたら、他の敵との衝突はチェックしない
 
         # 敵の弾 vs プレイヤー
         for i in range(len(self.enemy_bullets) - 1, -1, -1):
             bullet = self.enemy_bullets[i]
             if self.is_colliding(bullet, self.player):
-                self.enemy_bullets.pop(i)
-                if self.player.has_barrier:
-                    self.player.has_barrier = False
-                else:
-                    self.player.life -= 1
-                    if self.player.life <= 0:
-                        self.game_over()
-                return # プレイヤーがダメージを受けたら、他の弾との衝突はチェックしない
+                if self.player.invincible_timer == 0: # 無敵時間中でない場合のみダメージ
+                    self.enemy_bullets.pop(i)
+                    if self.player.has_barrier:
+                        self.player.has_barrier = False
+                    else:
+                        self.player.life -= 1
+                        pyxel.play(0, 2) # プレイヤー被弾音
+                        self.player.invincible_timer = 60 # 1秒間の無敵時間 (60フレーム)
+                        if self.player.life <= 0:
+                            self.game_over()
+                    return # プレイヤーがダメージを受けたら、他の弾との衝突はチェックしない
 
         # ボスとの衝突
         if self.boss:
@@ -565,6 +705,8 @@ class App:
                     self.boss.health -= bullet.power
                     self.bullets.pop(i)
                     if self.boss.health <= 0:
+                        self.explosions.append(Explosion(self.boss.x + self.boss.w / 2, self.boss.y + self.boss.h / 2, scale_val(100), 7, 30)) # ボス破壊時の大きな爆発
+                        pyxel.play(1, 1) # 爆発音
                         self.game_clear()
                     break
 
@@ -580,6 +722,8 @@ class App:
                 if self.is_colliding(hammer_hitbox, self.boss):
                     self.boss.health -= scale_val(5) # ハンマーダメージ
                     if self.boss.health <= 0:
+                        self.explosions.append(Explosion(self.boss.x + self.boss.w / 2, self.boss.y + self.boss.h / 2, scale_val(100), 7, 30)) # ボス破壊時の大きな爆発
+                        pyxel.play(1, 1) # 爆発音
                         self.game_clear()
 
     def apply_item_effect(self, item_type):
@@ -606,8 +750,9 @@ class App:
 
     def draw_ui(self):
         pyxel.text(5, 5, f"SCORE: {self.score}", 7) # White
-        pyxel.text(5, 15, f"LIFE: {self.player.life}", 7)
-        pyxel.text(5, 25, f"BOMB: {self.player.special_attack_stock}", 7)
+        pyxel.text(5, 15, f"HIGH SCORE: {self.high_score}", 7)
+        pyxel.text(5, 25, f"LIFE: {self.player.life}", 7)
+        pyxel.text(5, 35, f"BOMB: {self.player.special_attack_stock}", 7)
 
         # Add controls
         pyxel.text(5, SCREEN_HEIGHT - 40, "MOVE: ARROWS", 7)
@@ -617,8 +762,12 @@ class App:
 
     def game_over(self):
         self.game_phase = 'gameover'
+        if self.score > self.high_score:
+            self.save_high_score(self.score)
 
     def game_clear(self):
         self.game_phase = 'clear'
+        if self.score > self.high_score:
+            self.save_high_score(self.score)
 
 App()
