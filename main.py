@@ -828,7 +828,7 @@ class App:
         elif item_type['name'] == 'power':
             self.player.shot_type = 'normal'
             self.player.bullet_power = min(self.player.bullet_power + 1, 5)
-            self.player.bullet_size = min(self.player.bullet_size + scale_val(2), scale_val(15))
+            self.player.bullet_size = min(self.player.bullet_size + scale_val(5), scale_val(25)) # 弾のサイズをより大きくする
         elif item_type['name'] == '3way':
             self.player.shot_type = '3way'
             self.player.bullet_power = 1
