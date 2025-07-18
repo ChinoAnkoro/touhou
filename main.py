@@ -415,7 +415,7 @@ class App:
             h = scale_val(60)
             x = random.random() * (SCREEN_WIDTH - w)
             y = -h # Start from top
-            speed = random.uniform(scale_val(2), scale_val(5)) # 落下速度を速くする
+            speed = scale_val(7) # 落下速度を速くする
             self.clouds.append(Cloud(x, y, w, h, speed))
 
     def update(self):
@@ -579,8 +579,7 @@ class App:
             # Sky background with clouds
             pyxel.cls(12) # Light blue for sky
             for cloud in self.clouds:
-                if cloud.is_background_cloud:
-                    cloud.draw()
+                cloud.draw()
         else:
             # Space background with Earth
             pyxel.cls(0) # Black for space
@@ -705,7 +704,7 @@ class App:
         h = random.randint(scale_val(20), scale_val(70))
         x = random.random() * (SCREEN_WIDTH - w)
         y = -h # Start from top
-        speed = random.uniform(scale_val(2), scale_val(5)) # 落下速度を速くする
+        speed = scale_val(7) # 落下速度を速くする
         self.clouds.append(Cloud(x, y, w, h, speed))
 
     def create_item(self, cloud):
@@ -751,6 +750,18 @@ class App:
                         pyxel.play(1, 1) # 爆発音
                         if random.random() < 0.1:
                             self.create_heal_item(enemy)
+                    break # 弾が当たったら次の弾へ
+
+        # プレイヤーの弾 vs 雲
+        for i in range(len(self.bullets) - 1, -1, -1):
+            for j in range(len(self.clouds) - 1, -1, -1):
+                bullet = self.bullets[i]
+                cloud = self.clouds[j]
+                if self.is_colliding(bullet, cloud):
+                    self.bullets.pop(i)
+                    if not cloud.dropped_item: # 既にドロップ済みでなければ
+                        cloud.dropped_item = True
+                        self.create_item(cloud)
                     break # 弾が当たったら次の弾へ
 
         # ハンマー vs 敵
