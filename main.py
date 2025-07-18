@@ -426,6 +426,14 @@ class App:
 
         self.player.update() # Player update always runs
 
+        # 雲の更新 (常に実行)
+        for cloud in self.clouds:
+            cloud.update()
+            if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
+                cloud.dropped_item = True
+                self.create_item(cloud)
+        self.clouds = [c for c in self.clouds if c.y < SCREEN_HEIGHT]
+
         # Player input handling (shooting, hammer, special attack)
         if pyxel.btnp(pyxel.KEY_SPACE):
             self.create_bullet()
@@ -527,15 +535,6 @@ class App:
                 if enemy.type == 'shooter' and random.random() < 0.01: # 確率を調整
                     self.create_enemy_bullet(enemy, math.pi / 2) # 真下
             self.enemies = [e for e in self.enemies if e.y < SCREEN_HEIGHT]
-
-            # 雲の更新
-            for cloud in self.clouds:
-                cloud.update()
-                # アイテムドロップ判定
-                if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
-                    cloud.dropped_item = True
-                    self.create_item(cloud)
-            self.clouds = [c for c in self.clouds if c.y < SCREEN_HEIGHT]
 
         elif self.game_phase == 'boss':
             if self.boss:
@@ -702,8 +701,6 @@ class App:
         self.enemy_bullets.append(EnemyBullet(source.x + source.w / 2 - bullet_w / 2, source.y + source.h / 2, dx, dy, bullet_w, bullet_h, bullet_speed, 6)) # Pink
 
     def spawn_cloud(self):
-        if self.game_phase == 'start':
-            return
         w = random.randint(scale_val(50), scale_val(150))
         h = random.randint(scale_val(20), scale_val(70))
         x = random.random() * (SCREEN_WIDTH - w)
