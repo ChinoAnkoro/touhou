@@ -33,8 +33,9 @@ class Player:
         self.h = scale_val(50)
         self.x = SCREEN_WIDTH / 2 - self.w / 2
         self.y = SCREEN_HEIGHT - self.h - scale_val(10) # 画面下部に配置
-        self.speed = scale_val(5)
+        self.speed = scale_val(10)
         self.life = 3
+        self.max_life = 5
         self.shot_type = 'normal'
         self.bullet_power = 1
         self.bullet_size = scale_val(5)
@@ -217,6 +218,29 @@ class Explosion:
         if self.timer > 0:
             pyxel.rect(self.x - self.size / 2, self.y - self.size / 2, self.size, self.size, self.color)
 
+class BombEffect:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.radius = 0
+        self.max_radius = SCREEN_WIDTH
+        self.speed = 8
+        self.is_alive = True
+        self.color = 7 # White
+
+    def update(self):
+        self.radius += self.speed
+        if self.radius > self.max_radius:
+            self.is_alive = False
+
+    def draw(self):
+        # 複数の円を時間差で描画して波紋のようなエフェクトにする
+        for i in range(3):
+            r = self.radius - i * 20
+            if r > 0:
+                # 中空の円を描画
+                pyxel.circb(self.x, self.y, r, self.color)
+
 class HealItem:
     def __init__(self, x, y, w, h, speed, color):
         self.x = x
@@ -285,6 +309,14 @@ class Boss:
 
 
 class App:
+    # Inner class for the hammer hitbox to fix the scope issue
+    class HammerHitbox:
+        def __init__(self, x, y, w, h):
+            self.x = x
+            self.y = y
+            self.w = w
+            self.h = h
+            
     def __init__(self):
         pyxel.init(SCREEN_WIDTH, SCREEN_HEIGHT)
         pyxel.title("Pyxel Danmaku Game")
@@ -320,23 +352,60 @@ class App:
         self.heal_items = []
         self.boss = None
         self.explosions = [] # 爆発エフェクトのリスト
+        self.bomb_effects = [] # ボムエフェクトのリスト
 
         # サウンド定義
         pyxel.sound(0).set(notes="c1", tones="n", volumes="2", effects="q", speed=5) # Shot
         pyxel.sound(1).set(notes="c1", tones="n", volumes="7", effects="f", speed=15) # Hit/Explosion
         pyxel.sound(2).set(notes="c1", tones="n", volumes="7", effects="f", speed=30) # Player Hit
 
+        # BGMの定義
+        # メロディ (ch0)
+        pyxel.sound(10).set("c3e3g3c4 g3e3c3r", "t", "7", "n", 10)
+        # ベース (ch1)
+        pyxel.sound(11).set("c2g1c2g1 c2g1c2g1", "s", "5", "n", 10)
+        # アルペジオ (ch2)
+        pyxel.sound(12).set("c2e2g2c3e3g3c4e4", "t", "3", "f", 15)
+        pyxel.music(0).set([10], [11], [12], [])
+
+        # BGMの再生
+        pyxel.playm(0, loop=True)
+
         self.score = 0
         self.high_score = self.load_high_score() # ハイスコアを読み込む
-        self.game_phase = 'stage' # stage, boss, gameover, clear
+        self.game_phase = 'start' # start, stage, boss, gameover, clear
+        self.start_timer = 0
 
         self.enemy_spawn_timer = 0
         self.cloud_spawn_timer = 0
+
+        # 初期雲を10個生成
+        for _ in range(10):
+            w = scale_val(120)
+            h = scale_val(60)
+            x = random.random() * (SCREEN_WIDTH - w)
+            y = random.random() * (SCREEN_HEIGHT / 4)
+            speed = scale_val(1) if random.random() < 0.5 else -scale_val(1)
+            self.clouds.append(Cloud(x, y, w, h, speed))
 
     def update(self):
         if self.game_phase == 'gameover' or self.game_phase == 'clear':
             if pyxel.btnp(pyxel.KEY_R): # Rキーでリスタート
                 self.reset_game() # ゲームをリセット
+            return
+
+        if self.game_phase == 'start':
+            self.start_timer += 1
+            if self.start_timer >= 300: # 5秒経過
+                self.game_phase = 'stage'
+            # 雲の更新
+            for cloud in self.clouds:
+                cloud.update()
+                if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
+                    cloud.dropped_item = True
+                    self.create_item(cloud)
+            self.clouds = [c for c in self.clouds if c.x > -c.w and c.x < SCREEN_WIDTH + c.w]
+            self.player.update()
             return
 
         # ゲームフェーズの移行
@@ -352,7 +421,11 @@ class App:
             self.create_bullet()
             pyxel.play(0, 0) # ショット音
 
-        
+        # ハンマー攻撃 (Zキー)
+        if pyxel.btnp(pyxel.KEY_Z):
+            if self.player.hammer_timer <= 0:
+                self.player.is_hammering = True
+                self.player.hammer_timer = self.player.hammer_cooldown
 
         # 特殊攻撃
         if pyxel.btnp(pyxel.KEY_X) and self.player.special_attack_stock > 0:
@@ -362,6 +435,8 @@ class App:
                 enemy.health -= 10 # 敵にダメージ
             if self.boss:
                 self.boss.health -= 50 # ボスにダメージ
+            # ボムエフェクトを生成
+            self.bomb_effects.append(BombEffect(self.player.x + self.player.w / 2, self.player.y + self.player.h / 2))
 
         # 弾の更新
         for bullet in self.bullets:
@@ -381,7 +456,7 @@ class App:
         if self.game_phase == 'stage':
             # 敵の出現
             self.enemy_spawn_timer += 1
-            if self.enemy_spawn_timer >= 2: # 2フレームに1回敵を出現させる
+            if self.enemy_spawn_timer >= 4: # 4フレームに1回敵を出現させる
                 self.spawn_enemy()
                 self.enemy_spawn_timer = 0
 
@@ -438,6 +513,11 @@ class App:
         for explosion in self.explosions:
             explosion.update()
         self.explosions = [e for e in self.explosions if e.timer > 0]
+
+        # ボムエフェクトの更新
+        for effect in self.bomb_effects:
+            effect.update()
+        self.bomb_effects = [e for e in self.bomb_effects if e.is_alive]
 
         self.check_collisions()
 
@@ -502,6 +582,10 @@ class App:
         for explosion in self.explosions:
             explosion.draw()
 
+        # ボムエフェクトの描画
+        for effect in self.bomb_effects:
+            effect.draw()
+
         self.draw_ui()
 
         if self.game_phase == 'gameover':
@@ -562,6 +646,8 @@ class App:
         self.enemy_bullets.append(EnemyBullet(source.x + source.w / 2 - bullet_w / 2, source.y + source.h / 2, dx, dy, bullet_w, bullet_h, bullet_speed, 6)) # Pink
 
     def spawn_cloud(self, is_background_cloud=False):
+        if self.game_phase == 'start':
+            return
         if is_background_cloud:
             w = random.randint(scale_val(50), scale_val(150))
             h = random.randint(scale_val(20), scale_val(70))
@@ -591,6 +677,18 @@ class App:
         self.heal_items.append(HealItem(enemy.x + enemy.w / 2 - item_w / 2, enemy.y + enemy.h / 2 - item_h / 2, item_w, item_h, item_speed, 3)) # Lime green
 
     def check_collisions(self):
+        # Define hammer hitbox once if active, to be used for enemies and boss
+        hammer_hitbox = None
+        if self.player.is_hammering:
+            hammer_w = scale_val(70)
+            hammer_h = scale_val(70)
+            hammer_hitbox = self.HammerHitbox(
+                self.player.x + self.player.w / 2 - hammer_w / 2,
+                self.player.y - hammer_h / 2,
+                hammer_w,
+                hammer_h
+            )
+
         # プレイヤーの弾 vs 敵
         for i in range(len(self.bullets) - 1, -1, -1):
             for j in range(len(self.enemies) - 1, -1, -1):
@@ -612,22 +710,7 @@ class App:
                     break # 弾が当たったら次の弾へ
 
         # ハンマー vs 敵
-        if self.player.is_hammering:
-            hammer_w = scale_val(70)
-            hammer_h = scale_val(70)
-            # hammer_hitbox をクラスインスタンスとして定義
-            class HammerHitbox:
-                def __init__(self, x, y, w, h):
-                    self.x = x
-                    self.y = y
-                    self.w = w
-                    self.h = h
-            hammer_hitbox = HammerHitbox(
-                self.player.x + self.player.w / 2 - hammer_w / 2,
-                self.player.y - hammer_h / 2,
-                hammer_w,
-                hammer_h
-            )
+        if hammer_hitbox:
             for j in range(len(self.enemies) - 1, -1, -1):
                 enemy = self.enemies[j]
                 if self.is_colliding(hammer_hitbox, enemy):
@@ -661,7 +744,7 @@ class App:
         for i in range(len(self.heal_items) - 1, -1, -1):
             item = self.heal_items[i]
             if self.is_colliding(self.player, item):
-                self.player.life = min(self.player.life + 1, 5)
+                self.player.life = min(self.player.life + 1, self.player.max_life)
                 self.heal_items.pop(i)
 
         # プレイヤー vs 敵
@@ -711,20 +794,12 @@ class App:
                     break
 
             # ハンマー vs ボス
-            if self.player.is_hammering:
-                # hammer_hitbox をクラスインスタンスとして定義
-                hammer_hitbox = HammerHitbox(
-                    self.player.x + self.player.w / 2 - hammer_w / 2,
-                    self.player.y - hammer_h / 2,
-                    hammer_w,
-                    hammer_h
-                )
-                if self.is_colliding(hammer_hitbox, self.boss):
-                    self.boss.health -= scale_val(5) # ハンマーダメージ
-                    if self.boss.health <= 0:
-                        self.explosions.append(Explosion(self.boss.x + self.boss.w / 2, self.boss.y + self.boss.h / 2, scale_val(100), 7, 30)) # ボス破壊時の大きな爆発
-                        pyxel.play(1, 1) # 爆発音
-                        self.game_clear()
+            if hammer_hitbox and self.is_colliding(hammer_hitbox, self.boss):
+                self.boss.health -= scale_val(5) # ハンマーダメージ
+                if self.boss.health <= 0:
+                    self.explosions.append(Explosion(self.boss.x + self.boss.w / 2, self.boss.y + self.boss.h / 2, scale_val(100), 7, 30)) # ボス破壊時の大きな爆発
+                    pyxel.play(1, 1) # 爆発音
+                    self.game_clear()
 
     def apply_item_effect(self, item_type):
         if item_type['name'] == 'score':
@@ -749,9 +824,14 @@ class App:
         return a.x < b.x + b.w and a.x + a.w > b.x and a.y < b.y + b.h and a.y + a.h > b.y
 
     def draw_ui(self):
-        pyxel.text(5, 5, f"SCORE: {self.score}", 7) # White
-        pyxel.text(5, 15, f"HIGH SCORE: {self.high_score}", 7)
-        pyxel.text(5, 25, f"LIFE: {self.player.life}", 7)
+        # HPバーの背景
+        pyxel.rect(5, 5, 100, 5, 1) # Dark blue
+        # HPバー本体
+        hp_width = (self.player.life / self.player.max_life) * 100
+        pyxel.rect(5, 5, hp_width, 5, 11) # Green
+
+        pyxel.text(5, 15, f"SCORE: {self.score}", 7) # White
+        pyxel.text(5, 25, f"HIGH SCORE: {self.high_score}", 7)
         pyxel.text(5, 35, f"BOMB: {self.player.special_attack_stock}", 7)
 
         # Add controls
