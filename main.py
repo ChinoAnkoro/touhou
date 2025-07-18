@@ -186,13 +186,23 @@ class Item:
             {'name': 'barrier', 'color': 6},# pink
             {'name': 'bomb', 'color': 7}    # white (for flashing)
         ]
+        self.is_bouncing = False
+        self.bounce_speed = scale_val(5)
+        self.initial_bounce_y = 0
+        self.bounce_height = scale_val(30)
 
     @property
     def type(self):
         return self.item_types[self.type_index]
 
     def update(self):
-        self.y += self.speed
+        if self.is_bouncing:
+            self.y -= self.bounce_speed
+            if self.y <= self.initial_bounce_y - self.bounce_height:
+                self.is_bouncing = False
+                self.y = self.initial_bounce_y - self.bounce_height # Ensure it stops at the peak
+        else:
+            self.y += self.speed
 
     def draw(self):
         if self.type['name'] == 'bomb':
@@ -414,19 +424,29 @@ class App:
                 self.reset_game() # ゲームをリセット
             return
 
-        if self.game_phase == 'start':
-            self.start_timer += 1
-            if self.start_timer >= 300: # 5秒経過
-                self.game_phase = 'stage'
-            # 雲の更新
-            for cloud in self.clouds:
-                cloud.update()
-                if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
-                    cloud.dropped_item = True
-                    self.create_item(cloud)
-            self.clouds = [c for c in self.clouds if c.x > -c.w and c.x < SCREEN_WIDTH + c.w]
-            self.player.update()
-            return
+        self.player.update() # Player update always runs
+
+        # Player input handling (shooting, hammer, special attack)
+        if pyxel.btnp(pyxel.KEY_SPACE):
+            self.create_bullet()
+            pyxel.play(0, 0) # ショット音
+
+        # ハンマー攻撃 (Zキー)
+        if pyxel.btnp(pyxel.KEY_Z):
+            if self.player.hammer_timer <= 0:
+                self.player.is_hammering = True
+                self.player.hammer_timer = self.player.hammer_cooldown
+
+        # 特殊攻撃
+        if pyxel.btnp(pyxel.KEY_X) and self.player.special_attack_stock > 0:
+            self.player.special_attack_stock -= 1
+            self.enemy_bullets.clear() # 敵の弾を消去
+            for enemy in self.enemies:
+                enemy.health -= 10 # 敵にダメージ
+            if self.boss:
+                self.boss.health -= 50 # ボスにダメージ
+            # ボムエフェクトを生成
+            self.bomb_effects.append(BombEffect(self.player.x + self.player.w / 2, self.player.y + self.player.h / 2))
 
         # ゲームフェーズの移行
         if self.game_phase == 'stage' and self.score >= 100000: # スコア閾値を100000に調整
@@ -457,30 +477,6 @@ class App:
                 self.game_phase = 'boss'
                 self.boss = Boss()
                 pyxel.playm(1, loop=True) # ボスBGMを再生
-
-        self.player.update()
-
-        # プレイヤーの弾生成
-        if pyxel.btnp(pyxel.KEY_SPACE):
-            self.create_bullet()
-            pyxel.play(0, 0) # ショット音
-
-        # ハンマー攻撃 (Zキー)
-        if pyxel.btnp(pyxel.KEY_Z):
-            if self.player.hammer_timer <= 0:
-                self.player.is_hammering = True
-                self.player.hammer_timer = self.player.hammer_cooldown
-
-        # 特殊攻撃
-        if pyxel.btnp(pyxel.KEY_X) and self.player.special_attack_stock > 0:
-            self.player.special_attack_stock -= 1
-            self.enemy_bullets.clear() # 敵の弾を消去
-            for enemy in self.enemies:
-                enemy.health -= 10 # 敵にダメージ
-            if self.boss:
-                self.boss.health -= 50 # ボスにダメージ
-            # ボムエフェクトを生成
-            self.bomb_effects.append(BombEffect(self.player.x + self.player.w / 2, self.player.y + self.player.h / 2))
 
         # 弾の更新
         for bullet in self.bullets:
@@ -782,6 +778,8 @@ class App:
                 if self.is_colliding(bullet, item):
                     self.bullets.pop(i)
                     item.type_index = (item.type_index + 1) % len(item.item_types)
+                    item.is_bouncing = True
+                    item.initial_bounce_y = item.y
                     break
 
         # プレイヤー vs アイテム (アイテム取得)
