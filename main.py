@@ -384,6 +384,21 @@ class App:
         self.enemy_spawn_timer = 0
         self.cloud_spawn_timer = 0
 
+        # 敵のウェーブ定義
+        self.waves = [
+            # Wave 1: シューターとスウォーマー
+            ['shooter', 'shooter', 'shooter', 'swarmer', 'swarmer'],
+            # Wave 2: アーマードとシューター
+            ['armored', 'shooter', 'shooter', 'shooter'],
+            # Wave 3: ミックス
+            ['swarmer', 'swarmer', 'armored', 'shooter', 'shooter', 'swarmer'],
+            # 必要に応じてさらにウェーブを追加
+        ]
+        self.current_wave_index = 0
+        self.enemies_to_spawn_in_current_wave = [] # 現在のウェーブで出現させる敵のリスト
+        self.wave_spawn_timer = 0
+        self.wave_spawn_interval = 60 # 敵の出現間隔 (フレーム数)
+
         # 初期雲を10個生成
         for _ in range(10):
             w = scale_val(120)
@@ -483,11 +498,25 @@ class App:
         self.heal_items = [i for i in self.heal_items if i.y < SCREEN_HEIGHT]
 
         if self.game_phase == 'stage':
-            # 敵の出現
-            self.enemy_spawn_timer += 1
-            if self.enemy_spawn_timer >= 4: # 4フレームに1回敵を出現させる
-                self.spawn_enemy()
-                self.enemy_spawn_timer = 0
+            # 敵の出現 (ウェーブベース)
+            if not self.enemies_to_spawn_in_current_wave and not self.enemies: # 現在のウェーブの敵が全て出現し、かつ画面上の敵がいない場合
+                if self.current_wave_index < len(self.waves):
+                    self.enemies_to_spawn_in_current_wave = list(self.waves[self.current_wave_index]) # 次のウェーブの敵をコピー
+                    self.current_wave_index += 1
+                else:
+                    # 全てのウェーブが終了したら、ランダム出現に戻すか、ゲームクリアなど
+                    # ここでは一旦ランダム出現に戻す
+                    self.enemy_spawn_timer += 1
+                    if self.enemy_spawn_timer >= 4: # 4フレームに1回敵を出現させる
+                        self.spawn_enemy()
+                        self.enemy_spawn_timer = 0
+
+            if self.enemies_to_spawn_in_current_wave: # 出現させる敵がいる場合
+                self.wave_spawn_timer += 1
+                if self.wave_spawn_timer >= self.wave_spawn_interval:
+                    enemy_type = self.enemies_to_spawn_in_current_wave.pop(0)
+                    self.spawn_enemy(fixed_type=enemy_type)
+                    self.wave_spawn_timer = 0
 
             # 雲の出現
             self.cloud_spawn_timer += 1
@@ -638,20 +667,27 @@ class App:
         else:
             self.bullets.append(Bullet(self.player.x + self.player.w / 2 - bullet_props['w'] / 2, bullet_props['y'], 0, bullet_props['power'], bullet_props['w'], bullet_props['color']))
 
-    def spawn_enemy(self):
-        type_roll = random.random()
+    def spawn_enemy(self, fixed_type=None):
+        if fixed_type:
+            enemy_type = fixed_type
+        else:
+            type_roll = random.random()
+            if type_roll < 0.6:
+                enemy_type = 'shooter'
+            elif type_roll < 0.85:
+                enemy_type = 'swarmer'
+            else:
+                enemy_type = 'armored'
+        
         size = scale_val(40)
-        if type_roll < 0.6:
-            enemy_type = 'shooter'
+        if enemy_type == 'shooter':
             color = 8 # Red
             health = 2
-        elif type_roll < 0.85:
-            enemy_type = 'swarmer'
+        elif enemy_type == 'swarmer':
             size = scale_val(20)
             color = 9 # Orange
             health = 1
-        else:
-            enemy_type = 'armored'
+        else: # armored
             size = scale_val(50)
             color = 13 # Grey
             health = 5
