@@ -83,12 +83,12 @@ class Player:
 
         # プレイヤー本体 (シンプルな人型)
         # 頭
-        pyxel.circ(self.x + self.w / 2, self.y + self.h / 4, self.w / 4, 7) # 白
+        pyxel.circ(self.x + self.w / 2, self.y + self.h / 4, self.w / 4, 6) # Pink
         # 体
-        pyxel.rect(self.x + self.w / 4, self.y + self.h / 2, self.w / 2, self.h / 2, 7) # 白
+        pyxel.rect(self.x + self.w / 4, self.y + self.h / 2, self.w / 2, self.h / 2, 6) # Pink
         # 腕
-        pyxel.rect(self.x, self.y + self.h / 2, self.w / 4, self.h / 4, 7) # 白
-        pyxel.rect(self.x + self.w * 3 / 4, self.y + self.h / 2, self.w / 4, self.h / 4, 7) # 白
+        pyxel.rect(self.x, self.y + self.h / 2, self.w / 4, self.h / 4, 6) # Pink
+        pyxel.rect(self.x + self.w * 3 / 4, self.y + self.h / 2, self.w / 4, self.h / 4, 6) # Pink
 
         # ハンマーの描画
         if self.is_hammering:
@@ -264,13 +264,9 @@ class Cloud:
         self.h = h
         self.speed = speed
         self.dropped_item = False
-        self.is_background_cloud = is_background_cloud
 
     def update(self):
-        if self.is_background_cloud:
-            self.y += self.speed # Move downwards for background
-        else:
-            self.x += self.speed # Original horizontal movement for item clouds
+        self.y += self.speed # Move downwards
 
     def draw(self):
         # Pyxelには楕円描画がないので、rectで代用するか、後で画像を使う
@@ -368,6 +364,15 @@ class App:
         pyxel.sound(12).set("c2e2g2c3e3g3c4e4", "t", "3", "f", 15)
         pyxel.music(0).set([10], [11], [12], [])
 
+        # BGMの定義 (ボスステージ - 派手なBGM)
+        # メロディ (ch0)
+        pyxel.sound(13).set("c3g3e3c4g3e3c3r", "t", "7", "n", 8) # Faster, higher pitch
+        # ベース (ch1)
+        pyxel.sound(14).set("c3g2c3g2 c3g2c3g2", "s", "5", "n", 8) # Faster, higher pitch
+        # ドラム (ch2)
+        pyxel.sound(15).set("rrrrrrc1rrrrrr", "n", "5", "f", 4) # Percussive
+        pyxel.music(1).set([13], [14], [15], [])
+
         # BGMの再生
         pyxel.playm(0, loop=True)
 
@@ -384,8 +389,8 @@ class App:
             w = scale_val(120)
             h = scale_val(60)
             x = random.random() * (SCREEN_WIDTH - w)
-            y = random.random() * (SCREEN_HEIGHT / 4)
-            speed = scale_val(1) if random.random() < 0.5 else -scale_val(1)
+            y = -h # Start from top
+            speed = random.uniform(scale_val(0.5), scale_val(1.5))
             self.clouds.append(Cloud(x, y, w, h, speed))
 
     def update(self):
@@ -410,9 +415,33 @@ class App:
 
         # ゲームフェーズの移行
         if self.game_phase == 'stage' and self.score >= 100000: # スコア閾値を100000に調整
-            self.game_phase = 'boss'
+            self.game_phase = 'boss_intro'
             self.enemies.clear() # 残っている敵をクリア
-            self.boss = Boss()
+            self.boss_intro_timer = 0
+            # ボス登場前の雲を10個生成
+            for _ in range(10):
+                w = scale_val(120)
+                h = scale_val(60)
+                x = random.random() * (SCREEN_WIDTH - w)
+                y = -h # Start from top
+                speed = random.uniform(scale_val(0.5), scale_val(1.5))
+                self.clouds.append(Cloud(x, y, w, h, speed))
+            pyxel.playm(-1) # 現在のBGMを停止
+
+        if self.game_phase == 'boss_intro':
+            self.boss_intro_timer += 1
+            # 雲の更新
+            for cloud in self.clouds:
+                cloud.update()
+                if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
+                    cloud.dropped_item = True
+                    self.create_item(cloud)
+            self.clouds = [c for c in self.clouds if c.y < SCREEN_HEIGHT]
+
+            if self.boss_intro_timer >= 420: # 7秒経過 (60フレーム/秒 * 7秒)
+                self.game_phase = 'boss'
+                self.boss = Boss()
+                pyxel.playm(1, loop=True) # ボスBGMを再生
 
         self.player.update()
 
@@ -466,11 +495,6 @@ class App:
                 self.spawn_cloud() # アイテムドロップ用の雲
                 self.cloud_spawn_timer = 0
 
-            # 背景用の雲の出現 (スコア1000以上2000未満)
-            if self.score >= 1000 and self.score < 2000:
-                if random.random() < 0.005: # 確率で背景用の雲を生成
-                    self.spawn_cloud(is_background_cloud=True)
-
             # 敵の更新
             for enemy in self.enemies:
                 enemy.update()
@@ -482,16 +506,11 @@ class App:
             # 雲の更新
             for cloud in self.clouds:
                 cloud.update()
-                if cloud.is_background_cloud:
-                    # 背景用の雲は画面外に出たら削除
-                    if cloud.y > SCREEN_HEIGHT:
-                        self.clouds.remove(cloud)
-                else:
-                    # アイテムドロップ判定
-                    if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
-                        cloud.dropped_item = True
-                        self.create_item(cloud)
-            self.clouds = [c for c in self.clouds if c.x > -c.w and c.x < SCREEN_WIDTH + c.w or c.is_background_cloud and c.y < SCREEN_HEIGHT]
+                # アイテムドロップ判定
+                if not cloud.dropped_item and abs(cloud.x + cloud.w / 2 - SCREEN_WIDTH / 2) < scale_val(20):
+                    cloud.dropped_item = True
+                    self.create_item(cloud)
+            self.clouds = [c for c in self.clouds if c.y < SCREEN_HEIGHT]
 
         elif self.game_phase == 'boss':
             if self.boss:
@@ -578,6 +597,11 @@ class App:
         if self.boss:
             self.boss.draw()
 
+        # ボス登場演出中は雲を描画
+        if self.game_phase == 'boss_intro':
+            for cloud in self.clouds:
+                cloud.draw()
+
         # 爆発エフェクトの描画
         for explosion in self.explosions:
             explosion.draw()
@@ -645,24 +669,15 @@ class App:
         dy = math.sin(angle) * bullet_speed
         self.enemy_bullets.append(EnemyBullet(source.x + source.w / 2 - bullet_w / 2, source.y + source.h / 2, dx, dy, bullet_w, bullet_h, bullet_speed, 6)) # Pink
 
-    def spawn_cloud(self, is_background_cloud=False):
+    def spawn_cloud(self):
         if self.game_phase == 'start':
             return
-        if is_background_cloud:
-            w = random.randint(scale_val(50), scale_val(150))
-            h = random.randint(scale_val(20), scale_val(70))
-            x = random.random() * (SCREEN_WIDTH - w)
-            y = -h # Start from top
-            speed = random.uniform(scale_val(0.5), scale_val(1.5))
-            self.clouds.append(Cloud(x, y, w, h, speed, is_background_cloud=True))
-        else:
-            side = random.choice(['left', 'right'])
-            w = scale_val(120)
-            h = scale_val(60)
-            x = -w if side == 'left' else SCREEN_WIDTH
-            y = random.random() * (SCREEN_HEIGHT / 4)
-            speed = scale_val(1) if side == 'left' else -scale_val(1)
-            self.clouds.append(Cloud(x, y, w, h, speed))
+        w = random.randint(scale_val(50), scale_val(150))
+        h = random.randint(scale_val(20), scale_val(70))
+        x = random.random() * (SCREEN_WIDTH - w)
+        y = -h # Start from top
+        speed = random.uniform(scale_val(0.5), scale_val(1.5))
+        self.clouds.append(Cloud(x, y, w, h, speed))
 
     def create_item(self, cloud):
         item_w = scale_val(20)
